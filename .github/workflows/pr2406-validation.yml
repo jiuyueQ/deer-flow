@@ -1,0 +1,47 @@
+name: PR2406 merge validation
+on:
+  push:
+    branches: [ci/pr2406-merge-validation-20261119]
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      PYTHONPATH: .
+      NO_PROXY: '*'
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen
+      - name: Offline core suite
+        run: >-
+          uv run --no-sync pytest -m 'not live and not bundled_extension'
+          --ignore=tests/blocking_io --splits 6 --group ${{ matrix.shard }}
+          --splitting-algorithm least_duration --durations-path=.test_durations
+          tests/ -q --tb=short --junitxml=validation/core-${{ matrix.shard }}.xml
+      - name: Blocking I/O suite
+        if: always() && matrix.shard == 1
+        run: uv run --no-sync pytest tests/blocking_io -q --tb=short --junitxml=validation/blocking.xml
+      - name: Lint and format
+        if: always() && matrix.shard == 1
+        run: |
+          uv run --no-sync ruff check .
+          uv run --no-sync ruff format --check .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-${{ matrix.shard }}
+          path: backend/validation/*.xml
